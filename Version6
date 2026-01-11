@@ -1,67 +1,65 @@
+-- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-local TweenService = game:GetService("TweenService")
 
 -- Settings
 local espEnabled = true
-local maxESPDistance = 1000
 local suspicionThreshold = 3
 local susReactionDelay = 2
 
--- Anti-ESP Detection Variables
+-- Anti-ESP detection
 local playerSuspicion = {}
 
-local function rainbowColor(offset)
-    local hue = (tick() * 0.25 + offset) % 1
-    return Color3.fromHSV(hue, 1, 1)
+-- Friend check
+local function isFriend(player)
+    return LocalPlayer:IsFriendsWith(player.UserId)
 end
 
-local function getESPColor(player, distance)
-    if distance > maxESPDistance then
-        return Color3.fromRGB(100, 100, 100)
-    end
+-- Enemy color logic
+local function getEnemyColor(player)
     if player.Team == LocalPlayer.Team then
-        return rainbowColor(0.3)
+        return Color3.fromRGB(0, 170, 255) -- Teammate (blue)
     else
-        return rainbowColor(0)
+        return Color3.fromRGB(255, 255, 0) -- Enemy (yellow)
     end
 end
 
+-- Suspicion logic (IGNORES FRIENDS)
 local function detectSuspiciousBehavior(player, rootPosition)
-    local distance = (Camera.CFrame.Position - rootPosition).Magnitude
-    local suspicionLevel = playerSuspicion[player.UserId] or 0
+    if isFriend(player) then return end
 
-    local playerInFOV = Camera:WorldToViewportPoint(rootPosition)
-    local isBehindWall = playerInFOV.X < 0 or playerInFOV.X > 1 or playerInFOV.Y < 0 or playerInFOV.Y > 1
+    local suspicion = playerSuspicion[player.UserId] or 0
+    local _, onScreen = Camera:WorldToViewportPoint(rootPosition)
 
-    if isBehindWall then
-        suspicionLevel = suspicionLevel + 1
+    if not onScreen then
+        suspicion += 1
     end
 
-    if suspicionLevel > suspicionThreshold then
-        local esp = player.Character:FindFirstChild("ESP")
+    if suspicion > suspicionThreshold then
+        local esp = player.Character and player.Character:FindFirstChild("ESP")
         if esp then
             local highlight = esp:FindFirstChild("ESPHighlight")
             if highlight then
                 highlight.FillColor = Color3.fromRGB(255, 0, 0)
                 highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
-                highlight.FillTransparency = 0.5
+                highlight.FillTransparency = 0.45
             end
         end
     end
 
-    playerSuspicion[player.UserId] = suspicionLevel
+    playerSuspicion[player.UserId] = suspicion
 end
 
 local function resetSuspicion(player)
-    wait(susReactionDelay)
-    playerSuspicion[player.UserId] = 0
+    task.delay(susReactionDelay, function()
+        playerSuspicion[player.UserId] = 0
+    end)
 end
 
--- Setup ESP (without name and health UI)
+-- Apply ESP
 local function applyESP(player)
     if player == LocalPlayer then return end
 
@@ -70,58 +68,32 @@ local function applyESP(player)
         if not character or not character:FindFirstChild("HumanoidRootPart") then return end
         if character:FindFirstChild("ESP") then return end
 
-        local espFolder = Instance.new("Folder", character)
+        local espFolder = Instance.new("Folder")
         espFolder.Name = "ESP"
+        espFolder.Parent = character
 
         local highlight = Instance.new("Highlight")
         highlight.Name = "ESPHighlight"
         highlight.Adornee = character
-        highlight.FillColor = Color3.new(1, 0, 0)
-        highlight.OutlineColor = Color3.new(1, 0, 0)
-        highlight.FillTransparency = 0.8
-        highlight.OutlineTransparency = 0.1
-        highlight.Enabled = espEnabled
+
+        if isFriend(player) then
+            -- FRIEND SETTINGS
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+            highlight.FillTransparency = 0.35
+            highlight.OutlineTransparency = 0
+            highlight.Enabled = true -- ALWAYS visible
+        else
+            -- ENEMY SETTINGS
+            local color = getEnemyColor(player)
+            highlight.FillColor = color
+            highlight.OutlineColor = color
+            highlight.FillTransparency = 0.8
+            highlight.OutlineTransparency = 0.15
+            highlight.Enabled = espEnabled
+        end
+
         highlight.Parent = espFolder
-
-        -- Removed BillboardGui (nametag and health bar)
-        --[[
-        local root = character:FindFirstChild("HumanoidRootPart")
-        local billboard = Instance.new("BillboardGui")
-        billboard.Name = "ESPBillboard"
-        billboard.Adornee = character:FindFirstChild("Head") or root
-        billboard.Size = UDim2.new(0, 200, 0, 70)
-        billboard.StudsOffset = Vector3.new(0, 3.5, 0)
-        billboard.AlwaysOnTop = true
-        billboard.MaxDistance = math.huge
-        billboard.Parent = espFolder
-
-        local nameLabel = Instance.new("TextLabel")
-        nameLabel.Name = "NameLabel"
-        nameLabel.Parent = billboard
-        nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
-        nameLabel.Position = UDim2.new(0, 0, 0, 0)
-        nameLabel.BackgroundTransparency = 1
-        nameLabel.TextColor3 = Color3.new(1, 0, 0)
-        nameLabel.TextStrokeTransparency = 0
-        nameLabel.Text = player.Name
-        nameLabel.Font = Enum.Font.Legacy
-        nameLabel.TextScaled = true
-
-        local healthBack = Instance.new("Frame")
-        healthBack.Name = "HealthBackground"
-        healthBack.Parent = billboard
-        healthBack.Size = UDim2.new(1, -10, 0.15, 0)
-        healthBack.Position = UDim2.new(0, 5, 0.55, 0)
-        healthBack.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        healthBack.BorderSizePixel = 0
-
-        local healthBar = Instance.new("Frame")
-        healthBar.Name = "HealthBar"
-        healthBar.Parent = healthBack
-        healthBar.Size = UDim2.new(1, 0, 1, 0)
-        healthBar.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
-        healthBar.BorderSizePixel = 0
-        ]]
     end
 
     if player.Character then
@@ -134,37 +106,42 @@ local function applyESP(player)
     end)
 end
 
+-- Apply to existing players
 for _, player in ipairs(Players:GetPlayers()) do
     applyESP(player)
 end
 Players.PlayerAdded:Connect(applyESP)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == Enum.KeyCode.LeftAlt then
+-- Toggle ESP (LeftAlt) — FRIENDS IGNORE THIS
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.LeftAlt then
         espEnabled = not espEnabled
+
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
-                local esp = player.Character:FindFirstChild("ESP")
-                if esp then
-                    local highlight = esp:FindFirstChild("ESPHighlight")
-                    if highlight then highlight.Enabled = espEnabled end
+                if not isFriend(player) then
+                    local esp = player.Character:FindFirstChild("ESP")
+                    if esp then
+                        local highlight = esp:FindFirstChild("ESPHighlight")
+                        if highlight then
+                            highlight.Enabled = espEnabled
+                        end
+                    end
                 end
             end
         end
     end
 end)
 
+-- Main loop
 RunService.RenderStepped:Connect(function()
     if not espEnabled then return end
 
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("ESP") then
+        if player ~= LocalPlayer and player.Character then
             local root = player.Character:FindFirstChild("HumanoidRootPart")
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-
-            if root and humanoid then
+            if root then
                 detectSuspiciousBehavior(player, root.Position)
-
                 if playerSuspicion[player.UserId] and playerSuspicion[player.UserId] > 0 then
                     resetSuspicion(player)
                 end
@@ -172,19 +149,3 @@ RunService.RenderStepped:Connect(function()
         end
     end
 end)
-
--- Removed nametag distance updater
---[[
-RunService.RenderStepped:Connect(function()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local character = player.Character
-            local nameLabel = character:FindFirstChild("ESP") and character.ESP:FindFirstChild("ESPBillboard") and character.ESP.ESPBillboard:FindFirstChild("NameLabel")
-            if nameLabel then
-                local distance = (LocalPlayer.Character.HumanoidRootPart.Position - character.HumanoidRootPart.Position).Magnitude
-                nameLabel.Text = player.Name .. " - " .. math.floor(distance) .. " studs"
-            end
-        end
-    end
-end)
-]]
